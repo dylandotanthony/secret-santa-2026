@@ -89,6 +89,14 @@ const INITIAL_PARTICIPANTS = [
   }
 ];
 
+// Family who share gift lists but aren't in the Secret Santa draw
+const GIFT_LIST_ONLY = [
+  { id: 'mom', name: 'Mom', avatar: '👑', badge: 'Queen of Christmas', wishlistUrl: '', notes: '', listOnly: true },
+  { id: 'aria', name: 'Aria', avatar: '🌟', badge: 'Little Star', wishlistUrl: '', notes: '', listOnly: true },
+  { id: 'landon', name: 'Landon', avatar: '🚀', badge: 'Rocket Elf', wishlistUrl: '', notes: '', listOnly: true },
+  { id: 'div', name: 'Div', avatar: '🎨', badge: 'Merry Maker', wishlistUrl: '', notes: '', listOnly: true }
+];
+
 // Couple Exclusions: ONLY Beth <-> Jayd and Patrick <-> Dylan (Alexis and Cody are NOT a couple)
 const COUPLE_EXCLUSIONS = [
   ['beth', 'jayd'],
@@ -376,6 +384,10 @@ export default function App() {
     () => INITIAL_PARTICIPANTS.map(p => ({ ...p, ...sharedWishlists[p.id] })),
     [sharedWishlists]
   );
+  const giftListOnly = useMemo(
+    () => GIFT_LIST_ONLY.map(p => ({ ...p, ...sharedWishlists[p.id] })),
+    [sharedWishlists]
+  );
   const pairings = useMemo(
     () => (drawDoc ? buildPairingsFromDraw(drawDoc.pairs, participants) : []),
     [drawDoc, participants]
@@ -484,7 +496,7 @@ export default function App() {
   };
 
   const saveEdit = async (id) => {
-    const person = participants.find(p => p.id === id);
+    const person = [...participants, ...giftListOnly].find(p => p.id === id);
     if (!person) return;
 
     const formattedUrl = formatUrl(editWishlist);
@@ -1202,7 +1214,7 @@ export default function App() {
 
           {/* Grid of 6 Participant Wishlist Cards */}
           <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {participants.map((person) => {
+            {[...participants, ...giftListOnly].map((person, idx, everyone) => {
               const isEditing = editingId === person.id;
               // Check if this person has a partner in the couple exclusion rule
               const partnerName =
@@ -1222,9 +1234,19 @@ export default function App() {
                 : null;
 
               return (
+                <React.Fragment key={person.id}>
+                {person.listOnly && !everyone[idx - 1].listOnly && (
+                  <div className="col-span-full pt-4 mt-2 border-t border-emerald-700/80">
+                    <h3 className="font-christmas text-2xl sm:text-3xl font-bold text-amber-100">
+                      🎄 Family Gift Lists
+                    </h3>
+                    <p className="text-xs sm:text-sm text-emerald-200/80">
+                      Not in the Secret Santa draw, but they can share their lists too!
+                    </p>
+                  </div>
+                )}
                 <div
                   id={`wishlist-card-${person.id}`}
-                  key={person.id}
                   className="parchment-card text-stone-900 rounded-2xl p-5 border-2 border-amber-300 shadow-lg flex flex-col justify-between transition-all hover:-translate-y-0.5"
                 >
                   {isEditing ? (
@@ -1341,7 +1363,7 @@ export default function App() {
                                 {person.name}
                               </h3>
                               <span className="inline-block text-[11px] font-semibold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300 mt-0.5">
-                                {person.badge || 'Secret Santa Elf'}
+                                {person.listOnly ? 'Gift List Only' : person.badge || 'Secret Santa Elf'}
                               </span>
                             </div>
                           </div>
@@ -1422,6 +1444,7 @@ export default function App() {
                     </>
                   )}
                 </div>
+                </React.Fragment>
               );
             })}
           </div>

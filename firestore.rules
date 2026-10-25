@@ -13,7 +13,7 @@ service cloud.firestore {
 
     match /wishlists/{personId} {
       allow read: if true;
-      allow write: if personId in ['alexis', 'cody', 'beth', 'jayd', 'patrick', 'dylan']
+      allow write: if personId in ['alexis', 'cody', 'beth', 'jayd', 'patrick', 'dylan', 'mom', 'aria', 'landon', 'div']
         && request.resource.data.keys().hasOnly(['wishlistUrl', 'notes', 'updatedAt'])
         && request.resource.data.wishlistUrl is string
         && request.resource.data.wishlistUrl.size() < 500
