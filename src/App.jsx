@@ -1,4 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  subscribeToWishlists,
+  subscribeToDraw,
+  saveWishlist,
+  saveOfficialDraw
+} from './firebase';
 import { 
   Gift, 
   Lock, 
@@ -32,11 +38,6 @@ import {
 
 // --- Constants & Storage Keys (v3 ensures clean load of Alexis, Cody, Beth, Jayd, Patrick, Dylan) ---
 const DEFAULT_SECRET_CODE = 'SANTA2026';
-const STORAGE_KEY_PARTICIPANTS = 'secret_santa_participants_2026_v3';
-const STORAGE_KEY_PAIRINGS = 'secret_santa_pairings_2026_v3';
-const STORAGE_KEY_LOCKED = 'secret_santa_locked_2026_v3';
-const STORAGE_KEY_TIMESTAMP = 'secret_santa_timestamp_2026_v3';
-const STORAGE_KEY_COUPLE_RULE = 'secret_santa_couple_rule_2026_v3';
 
 const INITIAL_PARTICIPANTS = [
   { 
@@ -95,26 +96,16 @@ const COUPLE_EXCLUSIONS = [
   ['patrick', 'dylan']
 ];
 
-// The one official 2026 draw (giver id -> receiver id), baked in so every visitor sees the same pairings
-const OFFICIAL_DRAW = [
-  ['alexis', 'dylan'],
-  ['beth', 'cody'],
-  ['cody', 'jayd'],
-  ['dylan', 'beth'],
-  ['jayd', 'patrick'],
-  ['patrick', 'alexis']
-];
-const OFFICIAL_DRAW_DATE = 'Oct 24, 2026';
-
-function buildOfficialPairings(participants) {
-  const byId = Object.fromEntries(
-    [...INITIAL_PARTICIPANTS, ...participants].map(p => [p.id, p])
-  );
-  return OFFICIAL_DRAW.map(([giverId, receiverId]) => ({
-    id: `${giverId}-${receiverId}`,
-    giver: { ...byId[giverId] },
-    receiver: { ...byId[receiverId] }
-  }));
+// Turn the shared draw's { giver, receiver } ids into full pairing cards with everyone's latest wishlists
+function buildPairingsFromDraw(drawPairs, participants) {
+  const byId = Object.fromEntries(participants.map(p => [p.id, p]));
+  return drawPairs
+    .filter(({ giver, receiver }) => byId[giver] && byId[receiver])
+    .map(({ giver, receiver }) => ({
+      id: `${giver}-${receiver}`,
+      giver: { ...byId[giver] },
+      receiver: { ...byId[receiver] }
+    }));
 }
 
 const SCRAMBLE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789🎄❄️🦌🔔★🎁✨🍬';
@@ -282,33 +273,30 @@ const SNOWFLAKES = Array.from({ length: 28 }).map((_, i) => ({
 
 export default function App() {
   // --- Persistent State ---
-  const [participants, setParticipants] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_PARTICIPANTS);
-      return saved ? JSON.parse(saved) : INITIAL_PARTICIPANTS;
-    } catch {
-      return INITIAL_PARTICIPANTS;
-    }
-  });
+  // --- Shared State (lives in Firebase so everyone sees the same draw & wishlists) ---
+  const [sharedWishlists, setSharedWishlists] = useState({});
+  const [drawDoc, setDrawDoc] = useState(null);
+  const [drawLoaded, setDrawLoaded] = useState(false);
+  const [connectionError, setConnectionError] = useState('');
+  const drawSeenRef = useRef(false);
 
-  const [pairings, setPairings] = useState(() => buildOfficialPairings(participants));
-  const [isLocked, setIsLocked] = useState(true);
-  const [generatedTimestamp, setGeneratedTimestamp] = useState(OFFICIAL_DRAW_DATE);
+  const participants = useMemo(
+    () => INITIAL_PARTICIPANTS.map(p => ({ ...p, ...sharedWishlists[p.id] })),
+    [sharedWishlists]
+  );
+  const pairings = useMemo(
+    () => (drawDoc ? buildPairingsFromDraw(drawDoc.pairs, participants) : []),
+    [drawDoc, participants]
+  );
+  const isLocked = !!drawDoc;
+  const generatedTimestamp = drawDoc ? drawDoc.drawnAt : null;
 
-  const [enforceCouples, setEnforceCouples] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_COUPLE_RULE);
-      return saved !== null ? saved === 'true' : true;
-    } catch {
-      return true;
-    }
-  });
+  const [enforceCouples, setEnforceCouples] = useState(true);
 
   // --- Interactive UI State ---
   const [selectedPersonFilter, setSelectedPersonFilter] = useState('ALL'); // 'ALL' or participant.id
   const [codeInput, setCodeInput] = useState('');
   const [codeError, setCodeError] = useState('');
-  const [showCodeHint, setShowCodeHint] = useState(false);
 
   // Scrambling Cipher Sequence State
   const [isScrambling, setIsScrambling] = useState(false);
@@ -316,44 +304,57 @@ export default function App() {
 
   // Wishlist & Participant Editing State
   const [editingId, setEditingId] = useState(null);
-  const [editName, setEditName] = useState('');
   const [editWishlist, setEditWishlist] = useState('');
   const [editNotes, setEditNotes] = useState('');
-  const [newName, setNewName] = useState('');
-  const [newWishlist, setNewWishlist] = useState('');
-  const [newNotes, setNewNotes] = useState('');
-  const [formError, setFormError] = useState('');
-  const [showAddForm, setShowAddForm] = useState(false);
 
   // Modals & Toast Notifications
-  const [showResetModal, setShowResetModal] = useState(false);
-  const [resetCodeInput, setResetCodeInput] = useState('');
-  const [resetError, setResetError] = useState('');
   const [toastMessage, setToastMessage] = useState('');
 
-  // --- Save to LocalStorage ---
+  // --- Live Sync with Firebase ---
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_PARTICIPANTS, JSON.stringify(participants));
-    } catch (e) {
-      console.error('Failed to save participants', e);
-    }
-  }, [participants]);
+    const onError = (e) => {
+      console.error('Firebase sync failed', e);
+      setConnectionError('Couldn’t reach the North Pole server. Check your connection and refresh the page.');
+    };
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_PAIRINGS, JSON.stringify(pairings));
-      localStorage.setItem(STORAGE_KEY_LOCKED, String(isLocked));
-      localStorage.setItem(STORAGE_KEY_COUPLE_RULE, String(enforceCouples));
-      if (generatedTimestamp) {
-        localStorage.setItem(STORAGE_KEY_TIMESTAMP, generatedTimestamp);
-      } else {
-        localStorage.removeItem(STORAGE_KEY_TIMESTAMP);
+    const stopWishlists = subscribeToWishlists(setSharedWishlists, onError);
+    const stopDraw = subscribeToDraw((draw) => {
+      // Play the cipher scramble for anyone watching when the draw happens live (not on a normal page load)
+      if (draw && drawSeenRef.current === 'empty') {
+        playScrambleSequence(draw.pairs.length);
       }
-    } catch (e) {
-      console.error('Failed to save pairings', e);
-    }
-  }, [pairings, isLocked, generatedTimestamp, enforceCouples]);
+      drawSeenRef.current = draw ? 'drawn' : 'empty';
+      setDrawDoc(draw);
+      setDrawLoaded(true);
+    }, onError);
+
+    return () => {
+      stopWishlists();
+      stopDraw();
+    };
+  }, []);
+
+  const playScrambleSequence = (pairCount) => {
+    setIsScrambling(true);
+    setSelectedPersonFilter('ALL');
+
+    const phases = [
+      '🎄 WARMING UP THE NORTH POLE CIPHER ENGINE...',
+      '🦌 CHECKING MISTLETOE EXCLUSIONS (BETH ↔ JAYD & PATRICK ↔ DYLAN)...',
+      '✨ SHUFFLING SLEIGH BELL ENTROPY & LOCKING 1-WAY LOOP...',
+      '🎁 DECODING OFFICIAL 2026 SECRET SANTA PAIRINGS...'
+    ];
+
+    setScramblePhaseText(phases[0]);
+    setTimeout(() => setScramblePhaseText(phases[1]), 950);
+    setTimeout(() => setScramblePhaseText(phases[2]), 1950);
+    setTimeout(() => setScramblePhaseText(phases[3]), 2950);
+
+    setTimeout(() => {
+      setIsScrambling(false);
+      triggerToast('🎅 Official 2026 Pairings Drawn & Permanently Posted to the Reference Board!');
+    }, 2300 + pairCount * 400);
+  };
 
   const triggerToast = (msg) => {
     setToastMessage(msg);
@@ -372,7 +373,6 @@ export default function App() {
   // --- Edit / Add Participant & Sync Live Reference Board ---
   const startEditing = (person) => {
     setEditingId(person.id);
-    setEditName(person.name);
     setEditWishlist(person.wishlistUrl || '');
     setEditNotes(person.notes || '');
     // Smooth scroll to wishlist editor card if clicked from the Reference Board
@@ -382,87 +382,26 @@ export default function App() {
     }
   };
 
-  const saveEdit = (id) => {
-    const trimmedName = editName.trim();
-    if (!trimmedName) return;
+  const saveEdit = async (id) => {
+    const person = participants.find(p => p.id === id);
+    if (!person) return;
 
     const formattedUrl = formatUrl(editWishlist);
     const trimmedNotes = editNotes.trim();
 
-    const updatedParticipants = participants.map(p =>
-      p.id === id
-        ? { ...p, name: trimmedName, wishlistUrl: formattedUrl, notes: trimmedNotes }
-        : p
-    );
-    setParticipants(updatedParticipants);
-
-    // Immediately update the Official Pairings Reference Board so wishlist links & notes stay live
-    if (pairings.length > 0) {
-      const updatedPairings = pairings.map(pair => ({
-        ...pair,
-        giver:
-          pair.giver.id === id
-            ? { ...pair.giver, name: trimmedName, wishlistUrl: formattedUrl, notes: trimmedNotes }
-            : pair.giver,
-        receiver:
-          pair.receiver.id === id
-            ? { ...pair.receiver, name: trimmedName, wishlistUrl: formattedUrl, notes: trimmedNotes }
-            : pair.receiver
-      }));
-      setPairings(updatedPairings);
+    try {
+      // Saved to Firebase, so the live listener updates every open page (including this one)
+      await saveWishlist(id, formattedUrl, trimmedNotes);
+      setEditingId(null);
+      triggerToast(`✨ Updated ${person.name}'s Christmas Wishlist & Gift Hints!`);
+    } catch (e) {
+      console.error('Failed to save wishlist', e);
+      triggerToast('⚠️ Couldn’t save that wishlist. Check the link isn’t too long and try again.');
     }
-
-    setEditingId(null);
-    triggerToast(`✨ Updated ${trimmedName}'s Christmas Wishlist & Gift Hints!`);
   };
 
-  const handleAddParticipant = (e) => {
-    e.preventDefault();
-    setFormError('');
-    const trimmedName = newName.trim();
-    if (!trimmedName) {
-      setFormError('Please enter a name for the elf!');
-      return;
-    }
-    if (participants.some(p => p.name.toLowerCase() === trimmedName.toLowerCase())) {
-      setFormError('That name is already in the Secret Santa circle!');
-      return;
-    }
-
-    const festiveAvatars = ['🎄', '🦌', '⛄', '🎅', '🤶', '🧝', '🦊', '🐧', '🍪', '🔔'];
-    const randomAvatar = festiveAvatars[participants.length % festiveAvatars.length];
-
-    const newPerson = {
-      id: `${trimmedName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
-      name: trimmedName,
-      avatar: randomAvatar,
-      badge: 'Holiday Elf',
-      wishlistUrl: formatUrl(newWishlist),
-      notes: newNotes.trim()
-    };
-
-    setParticipants([...participants, newPerson]);
-    setNewName('');
-    setNewWishlist('');
-    setNewNotes('');
-    setShowAddForm(false);
-    triggerToast(`🎄 Added ${trimmedName} to the Secret Santa circle!`);
-  };
-
-  const handleDeleteParticipant = (id) => {
-    if (isLocked) return;
-    setParticipants(participants.filter(p => p.id !== id));
-  };
-
-  const handleRestoreDefaultRoster = () => {
-    if (isLocked) return;
-    setParticipants(INITIAL_PARTICIPANTS);
-    setEnforceCouples(true);
-    triggerToast('🎅 Restored Alexis, Cody, Beth, Jayd, Patrick & Dylan!');
-  };
-
-  // --- Trigger One-Time Code-Protected Cipher Draw ---
-  const handleTriggerRandomizer = (e) => {
+  // --- Trigger One-Time Code-Protected Cipher Draw (shared with everyone via Firebase) ---
+  const handleTriggerRandomizer = async (e) => {
     e.preventDefault();
     setCodeError('');
 
@@ -471,13 +410,8 @@ export default function App() {
       return;
     }
 
-    if (participants.length < 3) {
-      setCodeError('You need at least 3 participants to run the Secret Santa exchange!');
-      return;
-    }
-
     if (codeInput.trim().toUpperCase() !== DEFAULT_SECRET_CODE) {
-      setCodeError(' Ho Ho Hold on! That secret activation code isn’t right. Try SANTA2026!');
+      setCodeError(' Ho Ho Hold on! That secret activation code isn’t right.');
       return;
     }
 
@@ -490,48 +424,20 @@ export default function App() {
       minute: '2-digit'
     });
 
-    setPairings(computedPairings);
-    setIsLocked(true);
-    setGeneratedTimestamp(nowStr);
-    setIsScrambling(true);
-    setSelectedPersonFilter('ALL');
-    setCodeInput('');
-
-    const phases = [
-      '🎄 WARMING UP THE NORTH POLE CIPHER ENGINE...',
-      '🦌 CHECKING MISTLETOE EXCLUSIONS (BETH ↔ JAYD & PATRICK ↔ DYLAN)...',
-      '✨ SHUFFling SLEIGH BELL ENTROPY & LOCKING 1-WAY LOOP...',
-      '🎁 DECODING OFFICIAL 2026 SECRET SANTA PAIRINGS...'
-    ];
-
-    setScramblePhaseText(phases[0]);
-    setTimeout(() => setScramblePhaseText(phases[1]), 950);
-    setTimeout(() => setScramblePhaseText(phases[2]), 1950);
-    setTimeout(() => setScramblePhaseText(phases[3]), 2950);
-
-    const totalDuration = 2300 + computedPairings.length * 400;
-    setTimeout(() => {
-      setIsScrambling(false);
-      triggerToast('🎅 Official 2026 Pairings Drawn & Permanently Posted to the Reference Board!');
-    }, totalDuration);
-  };
-
-  // --- Organizer Reset ---
-  const handleOrganizerReset = (e) => {
-    e.preventDefault();
-    if (resetCodeInput.trim().toUpperCase() !== DEFAULT_SECRET_CODE) {
-      setResetError('Incorrect Organizer Code! Enter SANTA2026 to unlock.');
-      return;
+    try {
+      await saveOfficialDraw(
+        computedPairings.map(p => [p.giver.id, p.receiver.id]),
+        nowStr,
+        enforceCouples
+      );
+      setCodeInput('');
+    } catch (err) {
+      setCodeError(
+        err.message === 'already-drawn'
+          ? 'Someone already drew this year’s pairings! Refresh to see them.'
+          : 'Couldn’t reach the North Pole server. Check your connection and try again.'
+      );
     }
-    setPairings([]);
-    setIsLocked(false);
-    setIsScrambling(false);
-    setGeneratedTimestamp(null);
-    setSelectedPersonFilter('ALL');
-    setResetCodeInput('');
-    setResetError('');
-    setShowResetModal(false);
-    triggerToast('🔓 Pairings unlocked! Ready for a fresh draw.');
   };
 
   // --- Copy Formatted Reference Board Summary ---
@@ -755,7 +661,13 @@ export default function App() {
         {/* ===================================================================
             SECTION A: WHEN LOCKED -> PROMINENT OFFICIAL 2026 PAIRINGS REFERENCE BOARD
            =================================================================== */}
-        {isLocked && (
+        {!drawLoaded && (
+          <div className="text-center text-amber-100 font-whimsy py-10">
+            {connectionError || '❄️ Checking the North Pole for this year’s pairings...'}
+          </div>
+        )}
+
+        {drawLoaded && isLocked && (
           <section aria-label="This Year's Official Secret Santa Pairings" className=" candy-cane-border p-2.5 rounded-3xl shadow-2xl">
             <div className="parchment-card text-stone-900 rounded-2xl p-5 sm:p-8 border-2 border-amber-500/60 relative overflow-hidden">
               {/* Top Ribbon & Action Controls */}
@@ -1047,7 +959,7 @@ export default function App() {
             SECTION B: WHEN UNLOCKED -> NORTH POLE CIPHER RANDOMIZER MACHINE
             ( Plus Couple Exclusions Toggle for Beth<->Jayd & Patrick<->Dylan )
            =================================================================== */}
-        {!isLocked && (
+        {drawLoaded && !isLocked && (
           <section className="candy-cane-border p-2 rounded-3xl shadow-2xl">
             <div className="parchment-card text-stone-900 rounded-2xl p-6 sm:p-8 border-2 border-amber-400">
               <div className="grid lg:grid-cols-12 gap-8 items-center">
@@ -1113,30 +1025,7 @@ export default function App() {
                       <KeyRound className="w-4 h-4" />
                       <span>Secret Organizer Code Required</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowCodeHint(!showCodeHint)}
-                      className="text-xs text-amber-200/90 hover:text-white underline flex items-center gap-1 cursor-pointer"
-                    >
-                      {showCodeHint ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                      <span>{showCodeHint ? 'Hide Code' : 'Need Code?'}</span>
-                    </button>
                   </div>
-
-                  {showCodeHint && (
-                    <div className="mb-3 px-3 py-2 rounded-xl bg-amber-400/20 border border-amber-300/50 text-xs flex items-center justify-between">
-                      <span>
-                        Passcode: <strong className="font-mono text-amber-300">{DEFAULT_SECRET_CODE}</strong>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setCodeInput(DEFAULT_SECRET_CODE)}
-                        className="px-2 py-0.5 rounded bg-amber-300 text-red-950 font-bold text-xs cursor-pointer"
-                      >
-                        Tap to Fill
-                      </button>
-                    </div>
-                  )}
 
                   <form onSubmit={handleTriggerRandomizer} className="space-y-3.5">
                     <div>
@@ -1196,72 +1085,7 @@ export default function App() {
               </div>
             </div>
 
-            {!isLocked && (
-              <div className="flex flex-wrap items-center gap-2 no-print">
-                <button
-                  type="button"
-                  onClick={() => setShowAddForm(!showAddForm)}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-amber-100 border border-amber-300/40 font-whimsy text-xs flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>{showAddForm ? 'Close Form' : 'Add Another Person'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRestoreDefaultRoster}
-                  className="px-3 py-2 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700 text-xs font-semibold cursor-pointer"
-                  title="Reset roster to Alexis, Cody, Beth, Jayd, Patrick & Dylan"
-                >
-                  Restore Default 6
-                </button>
-              </div>
-            )}
           </div>
-
-          {/* Optional Add Participant Form (Only before pairings are locked) */}
-          {!isLocked && showAddForm && (
-            <form
-              onSubmit={handleAddParticipant}
-              className="mt-5 bg-[#091e15] border-2 border-amber-400/50 rounded-2xl p-4 sm:p-5 space-y-3 no-print"
-            >
-              <div className="text-xs font-whimsy uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
-                <Plus className="w-4 h-4" />
-                <span>Add New Secret Santa Participant</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Name *"
-                  className="bg-emerald-950/90 border border-emerald-700 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder:text-emerald-500"
-                />
-                <input
-                  type="text"
-                  value={newWishlist}
-                  onChange={(e) => setNewWishlist(e.target.value)}
-                  placeholder="Wishlist Link (https://...)"
-                  className="bg-emerald-950/90 border border-emerald-700 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder:text-emerald-500"
-                />
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newNotes}
-                    onChange={(e) => setNewNotes(e.target.value)}
-                    placeholder="Gift hints / sizes / treats..."
-                    className="flex-1 bg-emerald-950/90 border border-emerald-700 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder:text-emerald-500"
-                  />
-                  <button
-                    type="submit"
-                    className="px-4 py-2.5 rounded-xl bg-red-700 hover:bg-red-600 text-amber-100 font-whimsy text-xs shrink-0 cursor-pointer"
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
-              {formError && <p className="text-xs text-red-400">{formError}</p>}
-            </form>
-          )}
 
           {/* Grid of 6 Participant Wishlist Cards */}
           <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -1303,16 +1127,6 @@ export default function App() {
                         >
                           <X className="w-4 h-4" />
                         </button>
-                      </div>
-
-                      <div>
-                        <label className="text-[11px] font-bold uppercase text-stone-600">Name</label>
-                        <input
-                          type="text"
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          className="w-full mt-0.5 bg-white border border-amber-400 rounded-xl px-3 py-2 text-sm text-stone-900 font-semibold"
-                        />
                       </div>
 
                       <div>
@@ -1386,15 +1200,6 @@ export default function App() {
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
-                            {!isLocked && participants.length > 3 && (
-                              <button
-                                onClick={() => handleDeleteParticipant(person.id)}
-                                className="p-2 rounded-xl bg-stone-100 hover:bg-red-100 text-stone-500 hover:text-red-700 border border-stone-200 transition-colors cursor-pointer"
-                                title="Remove participant"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
                           </div>
                         </div>
 
@@ -1471,66 +1276,6 @@ export default function App() {
         </section>
       </main>
 
-      {/* Organizer Reset Modal (Requires Activation Code SANTA2026) */}
-      {showResetModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 no-print">
-          <div className="parchment-card text-stone-900 border-4 border-red-700 rounded-3xl max-w-md w-full p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2 text-red-800 font-whimsy text-lg">
-                <ShieldAlert className="w-5 h-5 text-red-700" />
-                <h3>Organizer Reset Required</h3>
-              </div>
-              <button
-                onClick={() => {
-                  setShowResetModal(false);
-                  setResetError('');
-                  setResetCodeInput('');
-                }}
-                className="text-stone-500 hover:text-stone-800"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="text-sm text-stone-700 mb-4 leading-relaxed">
-              To protect this year’s official Secret Santa pairings from accidental re-draws, unlocking the Reference Board requires the secret organizer code (<code className="font-mono font-bold text-red-800 bg-amber-200 px-1.5 py-0.5 rounded">{DEFAULT_SECRET_CODE}</code>).
-            </p>
-
-            <form onSubmit={handleOrganizerReset} className="space-y-4">
-              <input
-                type="text"
-                value={resetCodeInput}
-                onChange={(e) => {
-                  setResetCodeInput(e.target.value.toUpperCase());
-                  setResetError('');
-                }}
-                placeholder="Enter SANTA2026 to unlock..."
-                className="w-full bg-white border-2 border-amber-400 rounded-xl px-4 py-2.5 text-stone-900 font-mono uppercase tracking-widest focus:outline-none focus:border-red-600"
-              />
-
-              {resetError && (
-                <p className="text-xs font-bold text-red-600">{resetError}</p>
-              )}
-
-              <div className="flex justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setShowResetModal(false)}
-                  className="px-4 py-2 rounded-xl bg-stone-200 text-stone-700 text-xs font-whimsy cursor-pointer"
-                >
-                  Keep Current Pairings
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-red-700 hover:bg-red-800 text-amber-50 text-xs font-whimsy cursor-pointer shadow"
-                >
-                  Unlock &amp; Clear Board
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

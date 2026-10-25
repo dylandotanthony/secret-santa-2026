@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /wishlists/{personId} {
+      allow read: if true;
+      allow write: if personId in ['alexis', 'cody', 'beth', 'jayd', 'patrick', 'dylan']
+        && request.resource.data.keys().hasOnly(['wishlistUrl', 'notes', 'updatedAt'])
+        && request.resource.data.wishlistUrl is string
+        && request.resource.data.wishlistUrl.size() < 500
+        && request.resource.data.notes is string
+        && request.resource.data.notes.size() < 2000;
+    }
+    match /draw/{docId} {
+      allow read: if true;
+      allow create: if docId == 'official'
+        && request.resource.data.keys().hasOnly(['pairs', 'drawnAt', 'enforceCouples'])
+        && request.resource.data.pairs is list
+        && request.resource.data.pairs.size() == 6;
+    }
+  }
+}
