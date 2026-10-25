@@ -108,6 +108,16 @@ function buildPairingsFromDraw(drawPairs, participants) {
     }));
 }
 
+// Last year's draw (giver id -> receiver id): nobody gets the same person two years in a row
+const LAST_YEAR_PAIRINGS = {
+  beth: 'dylan',
+  dylan: 'alexis',
+  alexis: 'jayd',
+  jayd: 'cody',
+  cody: 'patrick',
+  patrick: 'beth'
+};
+
 const SCRAMBLE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789🎄❄️🦌🔔★🎁✨🍬';
 
 // Helper: Check if two participants are in the couple exclusions list
@@ -145,6 +155,11 @@ function generateSecretSantaPairings(participants, enforceCoupleExclusions = tru
       }
 
       if (enforceCoupleExclusions && isExcludedCouple(giver, receiver)) {
+        valid = false;
+        break;
+      }
+
+      if (LAST_YEAR_PAIRINGS[giver.id] === receiver.id) {
         valid = false;
         break;
       }
@@ -341,7 +356,7 @@ export default function App() {
     const phases = [
       '🎄 WARMING UP THE NORTH POLE CIPHER ENGINE...',
       '🦌 CHECKING MISTLETOE EXCLUSIONS (BETH ↔ JAYD & PATRICK ↔ DYLAN)...',
-      '✨ SHUFFLING SLEIGH BELL ENTROPY & LOCKING 1-WAY LOOP...',
+      '✨ SKIPPING LAST YEAR’S MATCHES & LOCKING 1-WAY LOOP...',
       '🎁 DECODING OFFICIAL 2026 SECRET SANTA PAIRINGS...'
     ];
 
@@ -1000,6 +1015,9 @@ export default function App() {
                         <p className="text-xs text-emerald-900/80 mt-0.5">
                           Prevents couples from drawing each other: <strong>Beth ↔ Jayd</strong> and <strong>Patrick ↔ Dylan</strong>.{' '}
                           <span className="underline decoration-emerald-500">Alexis &amp; Cody have no restriction</span> and can match with anyone!
+                        </p>
+                        <p className="text-xs text-emerald-900/80 mt-1">
+                          🔁 <strong>No repeats:</strong> nobody draws the same person they had last year (always on).
                         </p>
                       </div>
                     </div>
