@@ -1,6 +1,16 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Last year's matches (giver -> receiver) can't repeat
+    function isRepeat(pair) {
+      return (pair.giver == 'beth' && pair.receiver == 'dylan')
+        || (pair.giver == 'dylan' && pair.receiver == 'alexis')
+        || (pair.giver == 'alexis' && pair.receiver == 'jayd')
+        || (pair.giver == 'jayd' && pair.receiver == 'cody')
+        || (pair.giver == 'cody' && pair.receiver == 'patrick')
+        || (pair.giver == 'patrick' && pair.receiver == 'beth');
+    }
+
     match /wishlists/{personId} {
       allow read: if true;
       allow write: if personId in ['alexis', 'cody', 'beth', 'jayd', 'patrick', 'dylan']
@@ -15,7 +25,13 @@ service cloud.firestore {
       allow create: if docId == 'official'
         && request.resource.data.keys().hasOnly(['pairs', 'drawnAt', 'enforceCouples'])
         && request.resource.data.pairs is list
-        && request.resource.data.pairs.size() == 6;
+        && request.resource.data.pairs.size() == 6
+        && !isRepeat(request.resource.data.pairs[0])
+        && !isRepeat(request.resource.data.pairs[1])
+        && !isRepeat(request.resource.data.pairs[2])
+        && !isRepeat(request.resource.data.pairs[3])
+        && !isRepeat(request.resource.data.pairs[4])
+        && !isRepeat(request.resource.data.pairs[5]);
     }
   }
 }
