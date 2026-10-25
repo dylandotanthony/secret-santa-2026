@@ -44,48 +44,48 @@ const INITIAL_PARTICIPANTS = [
     name: 'Alexis', 
     avatar: '🧝‍♀️',
     badge: 'Tinsel Boss',
-    wishlistUrl: 'https://www.amazon.com/hz/wishlist/ls', 
-    notes: 'Cozy winter knits, vanilla & cedar candles, iced coffee tumblers, self-care treats' 
+    wishlistUrl: '',
+    notes: ''
   },
   { 
     id: 'cody', 
     name: 'Cody', 
     avatar: '🦌',
     badge: 'Sleigh Pilot',
-    wishlistUrl: 'https://www.amazon.com/hz/wishlist/ls', 
-    notes: 'Tech gadgets, outdoor gear, craft hot sauces, board games & snacks' 
+    wishlistUrl: '',
+    notes: ''
   },
   { 
     id: 'beth', 
     name: 'Beth', 
     avatar: '🤶',
     badge: 'Cookie Alchemist',
-    wishlistUrl: 'https://www.etsy.com', 
-    notes: 'Artisan mugs, bookish accessories, fuzzy blankets, peppermint bark' 
+    wishlistUrl: '',
+    notes: ''
   },
   { 
     id: 'jayd', 
     name: 'Jayd', 
     avatar: '⛄',
     badge: 'Snowflake Wizard',
-    wishlistUrl: 'https://www.target.com/gift-registry', 
-    notes: 'Cozy hoodies, gaming/desk accessories, gourmet snacks, travel gear' 
+    wishlistUrl: '',
+    notes: ''
   },
   { 
     id: 'patrick', 
     name: 'Patrick', 
     avatar: '🎅',
     badge: 'Workshop Captain',
-    wishlistUrl: 'https://www.rei.com/lists', 
-    notes: 'Cast iron & grilling tools, wool socks, whiskey stones, outdoor gear' 
+    wishlistUrl: '',
+    notes: ''
   },
   { 
     id: 'dylan', 
     name: 'Dylan', 
     avatar: '🦊',
     badge: 'Cocoa Connoisseur',
-    wishlistUrl: 'https://www.uncommongoods.com', 
-    notes: 'Vinyl records, specialty coffee beans, unique puzzles, cozy beanie hats' 
+    wishlistUrl: '',
+    notes: ''
   }
 ];
 
@@ -119,7 +119,83 @@ const LAST_YEAR_PAIRINGS = {
 
 const DEFAULT_SECRET_CODE = 'SANTA2026';
 
-const SCRAMBLE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789🎄❄️🦌🔔★🎁✨🍬';
+// Gift lists are stored as one item per line
+function notesToItems(notes) {
+  return (notes || '')
+    .split('\n')
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+const GiftList = ({ notes, className = '' }) => (
+  <ul className={`list-disc pl-4 space-y-0.5 marker:text-red-600 ${className}`}>
+    {notesToItems(notes).map((item, idx) => (
+      <li key={idx}>{item}</li>
+    ))}
+  </ul>
+);
+
+// --- Live Countdown to Christmas Morning (viewer's local time) ---
+function getNextChristmas(now) {
+  const christmas = new Date(now.getFullYear(), 11, 25);
+  // On Christmas Day itself, show the celebration instead of counting to next year
+  if (now >= christmas && now < new Date(now.getFullYear(), 11, 26)) return null;
+  if (now >= christmas) return new Date(now.getFullYear() + 1, 11, 25);
+  return christmas;
+}
+
+const ChristmasCountdown = () => {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const target = getNextChristmas(now);
+  if (!target) {
+    return (
+      <div className="font-christmas text-3xl sm:text-4xl text-amber-200 text-center">
+        🎄 Merry Christmas! 🎁
+      </div>
+    );
+  }
+
+  const totalSeconds = Math.max(0, Math.floor((target - now) / 1000));
+  const units = [
+    { label: 'Days', value: Math.floor(totalSeconds / 86400) },
+    { label: 'Hours', value: Math.floor((totalSeconds % 86400) / 3600) },
+    { label: 'Minutes', value: Math.floor((totalSeconds % 3600) / 60) },
+    { label: 'Seconds', value: totalSeconds % 60 }
+  ];
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="text-xs font-whimsy uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+        <Snowflake className="w-3.5 h-3.5" />
+        <span>Countdown to Christmas Morning</span>
+        <Snowflake className="w-3.5 h-3.5" />
+      </div>
+      <div className="flex items-stretch gap-2 sm:gap-3">
+        {units.map(({ label, value }) => (
+          <div
+            key={label}
+            className="w-16 sm:w-20 rounded-2xl bg-gradient-to-b from-red-700 to-red-900 border-2 border-amber-300 shadow-lg py-2 text-center"
+          >
+            <div className="font-whimsy text-2xl sm:text-3xl text-amber-50 tabular-nums leading-none">
+              {String(value).padStart(label === 'Days' ? 1 : 2, '0')}
+            </div>
+            <div className="text-[10px] sm:text-[11px] font-whimsy uppercase tracking-wider text-amber-200 mt-1">
+              {label}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const SCRAMBLE_CHARS ='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789🎄❄️🦌🔔★🎁✨🍬';
 
 // Helper: Check if two participants are in the couple exclusions list
 function isExcludedCouple(personA, personB) {
@@ -321,7 +397,8 @@ export default function App() {
   // Wishlist & Participant Editing State
   const [editingId, setEditingId] = useState(null);
   const [editWishlist, setEditWishlist] = useState('');
-  const [editNotes, setEditNotes] = useState('');
+  const [editItems, setEditItems] = useState([]);
+  const [newItem, setNewItem] = useState('');
 
   // Modals & Toast Notifications
   const [toastMessage, setToastMessage] = useState('');
@@ -390,7 +467,8 @@ export default function App() {
   const startEditing = (person) => {
     setEditingId(person.id);
     setEditWishlist(person.wishlistUrl || '');
-    setEditNotes(person.notes || '');
+    setEditItems(notesToItems(person.notes));
+    setNewItem('');
     // Smooth scroll to wishlist editor card if clicked from the Reference Board
     const el = document.getElementById(`wishlist-card-${person.id}`);
     if (el) {
@@ -398,12 +476,23 @@ export default function App() {
     }
   };
 
+  const addEditItem = () => {
+    const item = newItem.trim();
+    if (!item) return;
+    setEditItems([...editItems, item]);
+    setNewItem('');
+  };
+
   const saveEdit = async (id) => {
     const person = participants.find(p => p.id === id);
     if (!person) return;
 
     const formattedUrl = formatUrl(editWishlist);
-    const trimmedNotes = editNotes.trim();
+    // Gift list items are stored one per line; anything still typed in the "add" box counts too
+    const trimmedNotes = [...editItems, newItem]
+      .map(item => item.trim())
+      .filter(Boolean)
+      .join('\n');
 
     try {
       // Saved to Firebase, so the live listener updates every open page (including this one)
@@ -467,7 +556,7 @@ export default function App() {
       (p, idx) =>
         `${idx + 1}. ${p.giver.avatar || '🎅'} ${p.giver.name}  ➔  🎁 ${p.receiver.avatar || '🎄'} ${p.receiver.name}${
           p.receiver.wishlistUrl ? `\n   🔗 Wishlist: ${p.receiver.wishlistUrl}` : ''
-        }${p.receiver.notes ? `\n   💡 Hints: ${p.receiver.notes}` : ''}`
+        }${p.receiver.notes ? `\n   💡 Gift ideas:\n${notesToItems(p.receiver.notes).map(item => `      • ${item}`).join('\n')}` : ''}`
     );
     const text =
       `🎄✨ OFFICIAL 2026 SECRET SANTA PAIRINGS ✨🎄\n` +
@@ -612,6 +701,9 @@ export default function App() {
 
       {/* Whimsical Workshop Hero Header */}
       <header className="relative z-10 max-w-6xl mx-auto pt-7 pb-5 px-4 sm:px-6">
+        <div className="mb-6 no-print">
+          <ChristmasCountdown />
+        </div>
         <div className="candy-cane-border p-2 rounded-3xl shadow-2xl">
           <div className="bg-gradient-to-br from-[#133829] via-[#0e2c20] to-[#19221e] rounded-2xl p-6 sm:p-8 border-2 border-amber-300/40 relative overflow-hidden">
             {/* Corner Holly Accents */}
@@ -931,10 +1023,10 @@ export default function App() {
                         <div className="mt-3 pt-3 border-t border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                           <div className="text-xs text-stone-700 flex-1">
                             {pair.receiver.notes ? (
-                              <span>
-                                <strong className="text-red-800 font-whimsy">💡 {pair.receiver.name}’s Gift Ideas:</strong>{' '}
-                                {pair.receiver.notes}
-                              </span>
+                              <div>
+                                <strong className="text-red-800 font-whimsy">💡 {pair.receiver.name}’s Gift Ideas:</strong>
+                                <GiftList notes={pair.receiver.notes} className="mt-1" />
+                              </div>
                             ) : (
                               <span className="italic text-stone-400">No gift hints added yet</span>
                             )}
@@ -1101,7 +1193,7 @@ export default function App() {
                   🎁 Everyone’s Christmas Wishlists &amp; Gift Hints
                 </h2>
                 <p className="text-xs sm:text-sm text-emerald-200/80">
-                  Click <strong className="text-amber-300">&ldquo;Edit Wishlist / Notes&rdquo;</strong> on your card anytime to paste your Amazon, Etsy, or gift registry link!
+                  Click <strong className="text-amber-300">&ldquo;Edit Link&rdquo;</strong> on your card anytime to add your wishlist link and gift ideas!
                 </p>
               </div>
             </div>
@@ -1165,15 +1257,56 @@ export default function App() {
 
                       <div>
                         <label className="text-[11px] font-bold uppercase text-stone-600">
-                          Gift Hints, Sizes &amp; Favorite Treats
+                          Gift Ideas, Sizes &amp; Favorite Treats
                         </label>
-                        <textarea
-                          rows={2}
-                          value={editNotes}
-                          onChange={(e) => setEditNotes(e.target.value)}
-                          placeholder="Favorite colors, snacks, sizes, or gift ideas..."
-                          className="w-full mt-0.5 bg-white border border-amber-400 rounded-xl px-3 py-2 text-sm text-stone-900"
-                        />
+                        {editItems.length > 0 && (
+                          <ul className="mt-1 space-y-1.5">
+                            {editItems.map((item, idx) => (
+                              <li key={idx} className="flex items-center gap-1.5">
+                                <span className="text-red-600 text-sm shrink-0">•</span>
+                                <input
+                                  type="text"
+                                  value={item}
+                                  onChange={(e) =>
+                                    setEditItems(editItems.map((it, i) => (i === idx ? e.target.value : it)))
+                                  }
+                                  className="flex-1 min-w-0 bg-white border border-amber-300 rounded-lg px-2.5 py-1.5 text-sm text-stone-900"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setEditItems(editItems.filter((_, i) => i !== idx))}
+                                  className="p-1 rounded-lg text-stone-400 hover:text-red-700 hover:bg-red-50 cursor-pointer shrink-0"
+                                  title="Remove item"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={newItem}
+                            onChange={(e) => setNewItem(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addEditItem();
+                              }
+                            }}
+                            placeholder="Type an item, press Enter to add..."
+                            className="flex-1 min-w-0 bg-white border border-amber-400 rounded-lg px-2.5 py-1.5 text-sm text-stone-900"
+                          />
+                          <button
+                            type="button"
+                            onClick={addEditItem}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-400 text-xs font-whimsy flex items-center gap-1 cursor-pointer shrink-0"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add</span>
+                          </button>
+                        </div>
                       </div>
 
                       <div className="flex justify-end gap-2 pt-1">
@@ -1238,12 +1371,10 @@ export default function App() {
                             ✨ Gift Hints &amp; Wishes
                           </div>
                           {person.notes ? (
-                            <p className="text-xs text-stone-700 leading-relaxed">
-                              {person.notes}
-                            </p>
+                            <GiftList notes={person.notes} className="text-xs text-stone-700 leading-relaxed" />
                           ) : (
                             <p className="text-xs italic text-stone-400">
-                              No gift notes added yet — click edit to add hints!
+                              No gift ideas added yet — click Edit Link to add some!
                             </p>
                           )}
                         </div>
