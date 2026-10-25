@@ -32,7 +32,8 @@ import {
   Trees,
   Wand2,
   UserCheck,
-  Search
+  Search,
+  KeyRound
 } from 'lucide-react';
 
 // --- Constants & Storage Keys (v3 ensures clean load of Alexis, Cody, Beth, Jayd, Patrick, Dylan) ---
@@ -115,6 +116,8 @@ const LAST_YEAR_PAIRINGS = {
   cody: 'patrick',
   patrick: 'beth'
 };
+
+const DEFAULT_SECRET_CODE = 'SANTA2026';
 
 const SCRAMBLE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789🎄❄️🦌🔔★🎁✨🍬';
 
@@ -308,6 +311,7 @@ export default function App() {
 
   // --- Interactive UI State ---
   const [selectedPersonFilter, setSelectedPersonFilter] = useState('ALL'); // 'ALL' or participant.id
+  const [codeInput, setCodeInput] = useState('');
   const [codeError, setCodeError] = useState('');
 
   // Scrambling Cipher Sequence State
@@ -422,6 +426,11 @@ export default function App() {
       return;
     }
 
+    if (codeInput.trim().toUpperCase() !== DEFAULT_SECRET_CODE) {
+      setCodeError('Ho Ho Hold on! That’s not the organizer code.');
+      return;
+    }
+
     if (!window.confirm('🎅 This draws the official pairings for everyone and can’t be undone. Draw now?')) {
       return;
     }
@@ -441,6 +450,7 @@ export default function App() {
         nowStr,
         enforceCouples
       );
+      setCodeInput('');
     } catch (err) {
       setCodeError(
         err.message === 'already-drawn'
@@ -631,7 +641,7 @@ export default function App() {
                       ) : (
                         <>
                           <Unlock className="w-3.5 h-3.5 text-emerald-300" />
-                          <span>Awaiting the Big Draw</span>
+                          <span>Awaiting Organizer Draw</span>
                         </>
                       )}
                     </span>
@@ -985,7 +995,7 @@ export default function App() {
                   </h2>
 
                   <p className="text-stone-700 text-sm sm:text-base leading-relaxed">
-                    With one press of the button, the North Pole Cipher Machine will scramble everyone’s letters while it thinks and then permanently post <strong>this year’s official pairings</strong> right here on the site for <strong className="text-red-800">Alexis, Cody, Beth, Jayd, Patrick, and Dylan</strong> to reference!
+                    Once the organizer enters the code, the North Pole Cipher Machine will scramble everyone’s letters while it thinks and then permanently post <strong>this year’s official pairings</strong> right here on the site for <strong className="text-red-800">Alexis, Cody, Beth, Jayd, Patrick, and Dylan</strong> to reference!
                   </p>
 
                   {/* Mistletoe Couple Exclusions Card (Beth <-> Jayd & Patrick <-> Dylan ONLY) */}
@@ -1035,12 +1045,22 @@ export default function App() {
                 <div className="lg:col-span-5 bg-gradient-to-br from-[#123526] to-[#0a2117] text-amber-50 rounded-2xl p-6 border-2 border-amber-400/60 shadow-xl">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2 text-amber-300 font-whimsy text-sm">
-                      <Sparkles className="w-4 h-4" />
-                      <span>Ready When Everyone Is!</span>
+                      <KeyRound className="w-4 h-4" />
+                      <span>Organizer Code Required</span>
                     </div>
                   </div>
 
                   <form onSubmit={handleTriggerRandomizer} className="space-y-3.5">
+                    <input
+                      type="password"
+                      value={codeInput}
+                      onChange={(e) => {
+                        setCodeInput(e.target.value);
+                        setCodeError('');
+                      }}
+                      placeholder="Enter organizer code..."
+                      className="w-full bg-[#071710] border-2 border-emerald-600 focus:border-amber-300 rounded-xl px-4 py-3 text-amber-100 tracking-widest placeholder:text-emerald-500/70 placeholder:tracking-normal focus:outline-none"
+                    />
 
                     {codeError && (
                       <div className="p-2.5 rounded-xl bg-red-950/90 border border-red-400 text-red-200 text-xs flex items-center gap-2">
